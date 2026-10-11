@@ -1,16 +1,17 @@
-# safecircle
+# SafeCircle
 
-A new Flutter project.
+SafeCircle is a mobile safety app built with Flutter for families and travelers. The goal is to make it easier for people to stay connected, share location safely, and respond quickly when something goes wrong.
+
+It combines family coordination, emergency awareness, and safer travel support in one app.
 
 ## Getting Started
 
 This project is a starting point for a Flutter application.
 
-A few resources to get you started if this is your first Flutter project:
+If this is your first Flutter project, these resources may help you get started:
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
+- [Flutter cookbook](https://docs.flutter.dev/cookbook)
+- [Flutter documentation](https://docs.flutter.dev/)
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+The Flutter documentation includes tutorials, samples, guidance on mobile development, and a full API reference.
