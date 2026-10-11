@@ -1,0 +1,310 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isFamilyOwner(familyId) {
+      return signedIn()
+        && get(/databases/$(database)/documents/families/$(familyId))
+             .data.ownerUid == request.auth.uid;
+    }
+
+    function isFamilyMember(familyId) {
+      return signedIn()
+        && exists(
+          /databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid)
+        );
+    }
+
+    function isSafeZoneAlertForFamilyOwner(ownerUid) {
+      let owner = get(
+        /databases/$(database)/documents/users/$(ownerUid)
+      ).data;
+
+      return owner.familyId is string
+        && get(
+          /databases/$(database)/documents/families/$(owner.familyId)
+        ).data.ownerUid == ownerUid
+        && isFamilyMember(owner.familyId);
+    }
+
+    function hasValidInviteForFamily(familyId) {
+      let family = get(
+        /databases/$(database)/documents/families/$(familyId)
+      ).data;
+
+      return signedIn()
+        && family.inviteCode is string
+        && exists(
+          /databases/$(database)/documents/familyInvites/$(family.inviteCode)
+        )
+        && get(
+          /databases/$(database)/documents/familyInvites/$(family.inviteCode)
+        ).data.familyId == familyId;
+    }
+
+    function hasLeftFamily(familyId) {
+      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      let userAfter = getAfter(userPath).data;
+
+      return signedIn()
+        && existsAfter(userPath)
+        && (
+          !('familyId' in userAfter)
+          || userAfter.familyId != familyId
+        );
+    }
+
+    function familyHasNoOwner(familyId) {
+      let family = get(
+        /databases/$(database)/documents/families/$(familyId)
+      ).data;
+
+      return !('ownerUid' in family)
+        || !(family.ownerUid is string)
+        || !exists(
+          /databases/$(database)/documents/families/$(familyId)/members/$(family.ownerUid)
+        );
+    }
+
+    function isOwnerHandoff(familyId) {
+      let familyAfter = getAfter(
+        /databases/$(database)/documents/families/$(familyId)
+      ).data;
+      let leavingMemberPath =
+        /databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid);
+
+      return signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['ownerUid', 'updatedAt'])
+        && !existsAfter(leavingMemberPath)
+        && hasLeftFamily(familyId)
+        && (
+          !('ownerUid' in familyAfter)
+          || (
+            familyAfter.ownerUid is string
+            && existsAfter(
+              /databases/$(database)/documents/families/$(familyId)/members/$(familyAfter.ownerUid)
+            )
+            && getAfter(
+              /databases/$(database)/documents/families/$(familyId)/members/$(familyAfter.ownerUid)
+            ).data.relation == 'Owner'
+          )
+        );
+    }
+
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+
+      match /notifications/{notificationId} {
+        allow read, update, delete: if signedIn() && request.auth.uid == uid;
+        allow create: if signedIn()
+          && (
+            request.auth.uid == uid
+            || (
+              request.resource.data.keys().hasOnly([
+                'title',
+                'body',
+                'alert',
+                'sourceUid',
+                'createdAt'
+              ])
+              && request.resource.data.keys().hasAll([
+                'title',
+                'body',
+                'alert',
+                'sourceUid',
+                'createdAt'
+              ])
+              && request.resource.data.title == 'Safe Zone Alert'
+              && request.resource.data.body is string
+              && request.resource.data.alert == true
+              && request.resource.data.sourceUid == request.auth.uid
+              && request.resource.data.createdAt == request.time
+              && isSafeZoneAlertForFamilyOwner(uid)
+            )
+          );
+      }
+    }
+
+    match /families/{familyId} {
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+
+      allow get: if signedIn()
+        && (
+          resource.data.ownerUid == request.auth.uid
+          || isFamilyMember(familyId)
+          || (
+            resource.data.inviteCode is string
+            && exists(
+              /databases/$(database)/documents/familyInvites/$(resource.data.inviteCode)
+            )
+            && get(
+              /databases/$(database)/documents/familyInvites/$(resource.data.inviteCode)
+            ).data.familyId == familyId
+          )
+        );
+
+      allow list: if signedIn()
+        && (
+          resource.data.ownerUid == request.auth.uid
+          || isFamilyMember(familyId)
+        );
+
+      allow update: if signedIn()
+        && (
+          (
+            resource.data.ownerUid == request.auth.uid
+            && request.resource.data.ownerUid == request.auth.uid
+          )
+          || isOwnerHandoff(familyId)
+          || (
+            familyHasNoOwner(familyId)
+            && request.resource.data.ownerUid == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['ownerUid', 'updatedAt'])
+            && hasValidInviteForFamily(familyId)
+            && getAfter(
+              /databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid)
+            ).data.relation == 'Owner'
+            && getAfter(
+              /databases/$(database)/documents/users/$(request.auth.uid)
+            ).data.familyId == familyId
+          )
+        );
+
+      allow delete: if signedIn()
+        && resource.data.ownerUid == request.auth.uid;
+
+      match /members/{memberId} {
+        allow get: if signedIn()
+          && (
+            isFamilyOwner(familyId)
+            || isFamilyMember(familyId)
+            || (
+              memberId == get(
+                /databases/$(database)/documents/families/$(familyId)
+              ).data.ownerUid
+              && hasValidInviteForFamily(familyId)
+            )
+            || (
+              memberId == request.auth.uid
+              && hasValidInviteForFamily(familyId)
+            )
+          );
+
+        allow list: if signedIn()
+          && (
+            isFamilyOwner(familyId)
+            || isFamilyMember(familyId)
+          );
+
+        allow create, update: if signedIn()
+          && (
+            getAfter(
+              /databases/$(database)/documents/families/$(familyId)
+            ).data.ownerUid == request.auth.uid
+            || (
+              memberId == request.auth.uid
+              && hasValidInviteForFamily(familyId)
+              && getAfter(
+                /databases/$(database)/documents/users/$(request.auth.uid)
+              ).data.familyId == familyId
+            )
+          );
+
+        allow update: if signedIn()
+          && isFamilyOwner(familyId)
+          && memberId != request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['relation'])
+          && request.resource.data.relation == 'Owner'
+          && getAfter(
+            /databases/$(database)/documents/families/$(familyId)
+          ).data.ownerUid == memberId
+          && !existsAfter(
+            /databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid)
+          );
+
+        allow delete: if isFamilyOwner(familyId)
+          || (
+            signedIn()
+            && memberId == request.auth.uid
+            && hasLeftFamily(familyId)
+          );
+      }
+
+      match /notifications/{notificationId} {
+        allow read: if signedIn() && isFamilyMember(familyId);
+
+        allow create: if signedIn()
+          && isFamilyMember(familyId)
+          && request.resource.data.keys().hasOnly([
+            'title',
+            'body',
+            'alert',
+            'sourceUid',
+            'createdAt'
+          ])
+          && request.resource.data.keys().hasAll([
+            'title',
+            'body',
+            'alert',
+            'sourceUid',
+            'createdAt'
+          ])
+          && request.resource.data.title == 'Safe Zone Alert'
+          && request.resource.data.body is string
+          && request.resource.data.alert == true
+          && request.resource.data.sourceUid == request.auth.uid
+          && request.resource.data.createdAt == request.time
+          && getAfter(
+            /databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid)
+          ).data.outsideSafeZone == true
+          && get(
+            /databases/$(database)/documents/families/$(familyId)
+          ).data.safeZoneEnabled == true;
+
+        allow update, delete: if false;
+      }
+    }
+
+    match /familyInvites/{inviteCode} {
+      allow get: if signedIn();
+      allow list: if false;
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['familyId'])
+        && request.resource.data.familyId is string
+        && getAfter(
+          /databases/$(database)/documents/families/$(request.resource.data.familyId)
+        ).data.ownerUid == request.auth.uid
+        && getAfter(
+          /databases/$(database)/documents/families/$(request.resource.data.familyId)
+        ).data.inviteCode == inviteCode;
+
+      allow update, delete: if false;
+    }
+
+    match /missingChildReports/{reportId} {
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+
+      allow read, delete: if signedIn()
+        && resource.data.ownerUid == request.auth.uid;
+
+      allow update: if signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == request.auth.uid;
+    }
+
+    match /crowdLevels/{levelId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+  }
+}

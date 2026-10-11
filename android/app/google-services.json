@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "308440276697",
+    "project_id": "safecircle-e1236",
+    "storage_bucket": "safecircle-e1236.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:308440276697:android:178247fdd633cce88528c8",
+        "android_client_info": {
+          "package_name": "com.example.safecircle"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBxLCnRzq62ygQU2QmPbRm5CT1WPF3w2gI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
